@@ -42,7 +42,8 @@ my $pipeline;
 my $pbsSubmitRegex = "(\\d+).+";
 
 # Get command line parameters
-my $pbsStatusRegex
+my $pbsStatusRegex;
+
 # These are fetched from the config, but can be overwritten on the cl
 my $SPLIT_FILES = $CF::Constants::SPLIT_FILES;
 my $MAX_RUNS = $CF::Constants::MAX_RUNS;
@@ -1336,7 +1337,7 @@ sub make_submit_cmd {
                                         print "\nCouldn't find numeric job ID! '$job_id' needs ID from '$jname'\n";
                                 }
                         }
-                        if(scalar @jidarray > 0){ # note: replacing an equivalent of afterany [for other engines] with afterok here
+                        if(scalar @jidarray > 0){ # note: replacing an equivalent of afterany [for other engines] with afterok here
                                 $qsub .= " -Wdepend=afterok:" . join(':', @jidarray);
                         }
                 }
