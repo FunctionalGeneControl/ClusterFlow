@@ -8,6 +8,7 @@ use lib "$FindBin::RealBin/source";
 use CF::Constants;
 use CF::Helpers;
 use CF::Headnodehelpers;
+use Cwd;
 
 no warnings qw(once);
 
@@ -37,7 +38,11 @@ my @pipeline_folders = ('./', "$homedir/.clusterflow/pipelines/", "$RealBin/pipe
 my @module_folders = ('./', "$homedir/.clusterflow/modules/", "$RealBin/modules/");
 my $pipeline;
 
+# Hardcoding this for now...
+my $pbsSubmitRegex = "(\\d+).+";
+
 # Get command line parameters
+my $pbsStatusRegex
 # These are fetched from the config, but can be overwritten on the cl
 my $SPLIT_FILES = $CF::Constants::SPLIT_FILES;
 my $MAX_RUNS = $CF::Constants::MAX_RUNS;
@@ -312,7 +317,7 @@ if($cl_help){
 }
 
 # Check that we have everything we need
-my @valid_environments = ('local', 'GRIDEngine', 'SLURM', 'LSF');
+my @valid_environments = ('local', 'GRIDEngine', 'SLURM', 'LSF', 'PBS');
 my $environtments_regex = join('|', @valid_environments);
 if(length($CLUSTER_ENVIRONMENT) == 0){
 	my $global_fn = "$FindBin::RealBin/clusterflow.config";
@@ -1010,7 +1015,7 @@ sub get_mod_requirements {
 	}
 	unless(CF::Helpers::timestamp_to_minutes($time) > 0){
 		push (@errors, "No time requested ('$time') - setting to 2 days");
-		$time = '2-00:00:00';
+		$time = '48:00:00';
 	}
 	if(scalar @errors > 0){
 		warn "\nWarning: error parsing requirements for $module_fn\n  - ".join("\n  - ", @errors)."\n";
@@ -1265,6 +1270,91 @@ sub make_submit_cmd {
 		if(scalar @{$holdjid} > 0 && $prev_job ne 'start_000'){
 			$qsub .= " -hold_jid ". join(',', @{$holdjid});
 		}
+
+
+	####################################################
+	# Build command for (Imperial's) PBS - added by MS #
+	####################################################
+
+        }elsif($CLUSTER_ENVIRONMENT =~ /PBS/i){
+
+                # Get current working directory 
+                my $curdir = getcwd;
+
+                # Build command string
+                if($CUSTOM_JOB_SUBMIT_COMMAND && length($CUSTOM_JOB_SUBMIT_COMMAND) > 0){
+                        $qsub = $CUSTOM_JOB_SUBMIT_COMMAND;
+                } else {
+                        $qsub = 'echo "cd '.$curdir.'; {{command}}" | qsub -V -lselect=1:ncpus={{cores}}:mem={{mem}} -o {{outfn}} -j oe -N {{job_id}} {{notifications}}';
+                        # Do we have a priority?
+                        if($PRIORITY && $PRIORITY <= 0){
+                                $qsub .= " -p {{priority}}";
+                        }
+                }
+
+                # Work out qsub notification settings
+                my $notification_string = "";
+                if(defined($EMAIL) && length($EMAIL) > 0 && @NOTIFICATIONS){
+                        my $count = 0;
+                        $notification_string = "-M {{email}} -m ";
+                        foreach my $not (@NOTIFICATIONS){
+                                if($not eq 'end'){
+                                        $notification_string .= 'e';
+                                }
+                                if($not eq 'abort'){
+                                        $notification_string .= 'a';
+                                }
+                        }
+                }
+
+                my $qname ='';
+                if ($cl_qname) {
+                        $qname = "-q $cl_qname ";
+                }
+                # Swap in real values
+                $qsub =~ s/\{\{command}}/$cmd/g;
+                $qsub =~ s/\{\{job_id}}/$job_id/g;
+                $qsub =~ s/\{\{outfn}}/$outfn/g;
+                $qsub =~ s/\{\{cores}}/$cores/g;
+                $qsub =~ s/\{\{qname}}/$qname/g;
+                $qsub =~ s/\{\{mem}}/$mem/g;
+                $qsub =~ s/\{\{time}}/$time/g;
+                $qsub =~ s/\{\{priority}}/$PRIORITY/g;
+                $qsub =~ s/\{\{notifications}}/$notification_string/g;
+                $qsub =~ s/\{\{email}}/$EMAIL/g;
+                $qsub =~ s/\{\{project}}/$C_PROJECT/g;
+
+
+                # Job dependencies
+                # This is horrible on PBS (depends on capturing job submission STDOUT)
+                if(scalar @{$holdjid} > 0 && $prev_job ne 'start_000'){
+                        my @jidarray = ();
+                        foreach my $jname (@{$holdjid}){
+                                if(exists $JOB_NUM_IDS{$jname}){
+                                        push(@jidarray, $JOB_NUM_IDS{$jname});
+                                } elsif(!$cl_dryrun) {
+                                        print "\nCouldn't find numeric job ID! '$job_id' needs ID from '$jname'\n";
+                                }
+                        }
+                        if(scalar @jidarray > 0){ # note: replacing an equivalent of afterany [for other engines] with afterok here
+                                $qsub .= " -Wdepend=afterok:" . join(':', @jidarray);
+                        }
+                }
+
+
+                # Submit Job and capture ID
+                unless($cl_dryrun) {
+                        my $job_submit = `$qsub 2>&1`;
+                        chomp($job_submit);
+                        print SUBMIT $job_submit."\n";
+                        print $job_submit;
+                        if($job_submit =~ /$pbsSubmitRegex/){
+                                $JOB_NUM_IDS{$job_id} = $1;
+                        } else {
+                                print "\nERROR! Couldn't find job id for $job_id: $job_submit\n";
+                        }
+                }
+
 
 
 	###########################
