@@ -1206,7 +1206,7 @@ sub make_submit_cmd {
 		unless($cl_dryrun) {
 			my $job_submit = `$qsub 2>&1`;
 			chomp($job_submit);
-            print SUBMIT $job_submit."\n";
+            		print SUBMIT $job_submit."\n";
 			if($job_submit =~ /Submitted batch job (\d+)/){
 				$JOB_NUM_IDS{$job_id} = $1;
 			} else {
@@ -1394,7 +1394,7 @@ if($cl_dryrun){
 # Run jobs
 else {
     # SLURM jobs are already sent, during command building
-    if($CLUSTER_ENVIRONMENT =~ /SLURM/i){
+    if($CLUSTER_ENVIRONMENT =~ /SLURM|PBS/i){
         print "\nJobs submitted.\n\n";
 		print SUBMIT "\n\nTotal number of Cluster Flow jobs submitted: ".(scalar @qsubs)."\n";
         # Print actual commands to the submission log file
